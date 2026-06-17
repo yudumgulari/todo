@@ -1,12 +1,22 @@
 // --- Supabase bağlantısı ---
 // Bu iki değer herkese açıktır (gizli değildir); güvenlik veritabanındaki
-// RLS kuralları ile sağlanır. Bu uygulamada giriş yok, herkes aynı listeyi paylaşır.
+// RLS kuralları ile sağlanır. Her kullanıcı yalnızca kendi görevlerini görür.
 const SUPABASE_URL = "https://sywrqimvyjksbyhdgpys.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1wOV5QjP1JVA3b4EsF_m-Q_qx1R4X5z";
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // --- DOM elemanları ---
+const authView = document.getElementById("auth-view");
+const appView = document.getElementById("app-view");
+const authForm = document.getElementById("auth-form");
+const authEmail = document.getElementById("auth-email");
+const authPassword = document.getElementById("auth-password");
+const signupBtn = document.getElementById("signup-btn");
+const authMessage = document.getElementById("auth-message");
+const userEmail = document.getElementById("user-email");
+const logoutBtn = document.getElementById("logout-btn");
+
 const form = document.getElementById("todo-form");
 const input = document.getElementById("todo-input");
 const list = document.getElementById("todo-list");
@@ -17,7 +27,66 @@ const filterBtns = document.querySelectorAll(".filter");
 let todos = [];
 let filter = "all";
 
-// Veritabanından tüm görevleri çek
+// ============ KİMLİK DOĞRULAMA (AUTH) ============
+
+function showMessage(text, type) {
+  authMessage.textContent = text;
+  authMessage.className = "auth-message " + (type || "");
+}
+
+// Giriş yap
+authForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showMessage("Giriş yapılıyor...");
+  const { error } = await db.auth.signInWithPassword({
+    email: authEmail.value.trim(),
+    password: authPassword.value,
+  });
+  if (error) showMessage("Giriş başarısız: " + cevir(error.message), "error");
+});
+
+// Kaydol
+signupBtn.addEventListener("click", async () => {
+  if (!authEmail.value.trim() || authPassword.value.length < 6) {
+    return showMessage("E-posta gir ve en az 6 karakterlik şifre seç.", "error");
+  }
+  showMessage("Hesap oluşturuluyor...");
+  const { error } = await db.auth.signUp({
+    email: authEmail.value.trim(),
+    password: authPassword.value,
+  });
+  if (error) showMessage("Kayıt başarısız: " + cevir(error.message), "error");
+  else showMessage("Hesap oluşturuldu, giriş yapılıyor...", "success");
+});
+
+// Çıkış yap
+logoutBtn.addEventListener("click", () => db.auth.signOut());
+
+// Sık görülen hata mesajlarını Türkçeleştir
+function cevir(msg) {
+  if (/invalid login credentials/i.test(msg)) return "E-posta veya şifre hatalı.";
+  if (/already registered/i.test(msg)) return "Bu e-posta zaten kayıtlı.";
+  if (/password should be at least/i.test(msg)) return "Şifre çok kısa.";
+  return msg;
+}
+
+// Giriş durumu değişince ekranı güncelle
+db.auth.onAuthStateChange((_event, session) => {
+  if (session) {
+    authView.hidden = true;
+    appView.hidden = false;
+    userEmail.textContent = session.user.email;
+    authForm.reset();
+    load();
+  } else {
+    appView.hidden = true;
+    authView.hidden = false;
+    todos = [];
+  }
+});
+
+// ============ GÖREVLER (TODOS) ============
+
 async function load() {
   const { data, error } = await db
     .from("todos")
@@ -26,7 +95,7 @@ async function load() {
 
   if (error) {
     console.error("Görevler yüklenemedi:", error);
-    list.innerHTML = '<li class="empty">⚠️ Veritabanına bağlanılamadı.</li>';
+    list.innerHTML = '<li class="empty">⚠️ Görevler yüklenemedi.</li>';
     return;
   }
   todos = data;
@@ -76,7 +145,7 @@ function render() {
   count.textContent = `${remaining} görev kaldı`;
 }
 
-// Yeni görev ekle
+// Yeni görev ekle (user_id veritabanında otomatik atanır)
 async function addTodo(text) {
   const { data, error } = await db
     .from("todos")
@@ -89,7 +158,6 @@ async function addTodo(text) {
   render();
 }
 
-// Tamamlandı durumunu değiştir
 async function toggle(todo) {
   const { data, error } = await db
     .from("todos")
@@ -104,7 +172,6 @@ async function toggle(todo) {
   render();
 }
 
-// Görev sil
 async function remove(id) {
   const { error } = await db.from("todos").delete().eq("id", id);
   if (error) return console.error("Silinemedi:", error);
@@ -112,7 +179,6 @@ async function remove(id) {
   render();
 }
 
-// Tamamlananları topluca sil
 async function clearDone() {
   const { error } = await db.from("todos").delete().eq("done", true);
   if (error) return console.error("Temizlenemedi:", error);
@@ -140,6 +206,3 @@ filterBtns.forEach((btn) => {
     render();
   });
 });
-
-// Başlat
-load();
